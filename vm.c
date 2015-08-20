@@ -23,7 +23,7 @@ This software can be relicensed on request; contact the author.
 #define NUM_STACKS 4
 #define STACK_SIZE 1024 // in bytes
 uint32_t pc = 0;
-uint32_t sp[NUM_STACKS] = {0};
+uint32_t sp[NUM_STACKS] = {0}; // stack pointers always point to the next free position
 uint8_t stacks[NUM_STACKS][STACK_SIZE];
 
 // these are actually used as a bool, their size doesn't matter as long as it's at least 1 bit wide
@@ -34,6 +34,16 @@ void updateFlags(int32_t value) {
   flag_zero = !value;
   flag_negative = value < 0;
 }
+
+typedef enum {
+  NONE = 0,
+  ERR_ARITHMETIC,
+  ERR_STACK_OVERFLOW,
+  ERR_STACK_UNDERFLOW,
+  ERR_INSUFFICIENT_PERMISSIONS,
+  ERR_TARGET, // PC out of bounds
+} RuntimeError;
+RuntimeError last_error = NONE;
 
 void parseInstruction(uint16_t instruction, uint16_t* code, uint16_t* source, uint16_t* destination) {
   *destination = instruction & 3;
@@ -60,20 +70,30 @@ uint32_t fetchLiteral(uint8_t* p, int size) {
 }
 
 void stackPushUint(unsigned int stack, int size, uint32_t value) {
-  // TODO: check if stack is < NUM_STACKS
-  // TODO: check for stack overflows
   printf("Push to stack %d value %u with size %d. cur sp: %u\n", stack, value, size, sp[stack]);
   switch(size) {
     case 8:
+      if(sp[stack] + 1 >= STACK_SIZE) {
+        last_error = ERR_STACK_OVERFLOW;
+        return;
+      }
       stacks[stack][sp[stack]] = value & 0xff;
       sp[stack]++;
       break;
     case 16:
+      if(sp[stack] + 2 >= STACK_SIZE) {
+        last_error = ERR_STACK_OVERFLOW;
+        return;
+      }
       stacks[stack][sp[stack]] = value & 0xff;
       stacks[stack][sp[stack]+1] = value >> 8;
       sp[stack] += 2;
       break;
     case 32:
+      if(sp[stack] + 4 >= STACK_SIZE) {
+        last_error = ERR_STACK_OVERFLOW;
+        return;
+      }
       stacks[stack][sp[stack]] = value & 0xff;
       stacks[stack][sp[stack]+1] = (value & 0xff00) >> 8;
       stacks[stack][sp[stack]+2] = (value & 0xff0000) >> 16;
@@ -84,18 +104,28 @@ void stackPushUint(unsigned int stack, int size, uint32_t value) {
 }
 
 uint32_t stackPeekUint(unsigned int stack, int size) {
-  // TODO: check if stack is < NUM_STACKS
-  // TODO: check for stack underflows
   uint32_t value = 0;
   switch(size) {
     case 8:
+      if(!sp[stack]) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       value = stacks[stack][sp[stack]-1];
       break;
     case 16:
+      if(sp[stack] < 2) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       value = stacks[stack][sp[stack]-1] << 8;
       value |= stacks[stack][sp[stack]-2];
       break;
     case 32:
+      if(sp[stack] < 4) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       value = stacks[stack][sp[stack]-1] << 24;
       value |= stacks[stack][sp[stack]-2] << 16;
       value |= stacks[stack][sp[stack]-3] << 8;
@@ -106,21 +136,31 @@ uint32_t stackPeekUint(unsigned int stack, int size) {
 }
 
 uint32_t stackPopUint(unsigned int stack, int size) {
-  // TODO: check if stack is < NUM_STACKS
-  // TODO: check for stack underflows
   uint32_t value = 0;
   switch(size) {
     case 8:
+      if(!sp[stack]) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       sp[stack]--;
       value = stacks[stack][sp[stack]];
       break;
     case 16:
+      if(sp[stack] < 2) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       sp[stack]--;
       value = stacks[stack][sp[stack]] << 8;
       sp[stack]--;
       value |= stacks[stack][sp[stack]];
       break;
     case 32:
+      if(sp[stack] < 4) {
+        last_error = ERR_STACK_UNDERFLOW;
+        return 0;
+      }
       sp[stack]--;
       value = stacks[stack][sp[stack]] << 24;
       sp[stack]--;
@@ -137,7 +177,6 @@ uint32_t stackPopUint(unsigned int stack, int size) {
 
 typedef enum {OP_ADD = 0, OP_ADDF, OP_SUB, OP_SUBF, OP_MUL,OP_MULF, OP_DIV, OP_DIVF, OP_MOD, OP_MODF} MathOperations;
 void mathIntInstruction(unsigned int src, unsigned int dest, int size, int operation) {
-  // TODO make this work for signed
   uint32_t op1 = stackPopUint(src, size);
   uint32_t op2 = stackPopUint(src, size);
   int32_t result = 0;
@@ -152,10 +191,20 @@ void mathIntInstruction(unsigned int src, unsigned int dest, int size, int opera
       result = op2*op1;
       break;
     case OP_DIV:
-      result = op2/op1;
+      if(op1) {
+        result = op2/op1;
+      } else {
+        last_error = ERR_ARITHMETIC;
+        return;
+      }
       break;
     case OP_MOD:
-      result = op2%op1;
+      if(op1) {
+        result = op2%op1;
+      } else {
+        last_error = ERR_ARITHMETIC;
+        return;
+      }
       break;
   }
   stackPushUint(dest, size, result);
@@ -225,8 +274,12 @@ void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int 
 
 void run(uint8_t* program, uint32_t buflen) {
   pc = 0;
+  last_error = NONE;
   updateFlags(0); // reset flags
   while(pc < buflen) {
+    if(last_error != NONE) {
+      return;
+    }
     uint16_t instruction = program[pc] | (program[pc + 1] << 8);
     pc += 2;
     uint16_t code, source, destination;
@@ -460,6 +513,7 @@ void run(uint8_t* program, uint32_t buflen) {
       // default: nop
     }
   }
+  last_error = ERR_TARGET;
 }
 
 int main(int argc, char *argv[]) {
@@ -501,5 +555,8 @@ int main(int argc, char *argv[]) {
 
   fclose(f);
   run(program, size);
+  if(last_error != NONE) {
+    printf("Runtime error: %u\n", last_error);
+  }
   return 0;
 }
