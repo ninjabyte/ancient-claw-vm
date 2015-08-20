@@ -227,7 +227,7 @@ void run(uint8_t* program, uint32_t buflen) {
   pc = 0;
   updateFlags(0); // reset flags
   while(pc < buflen) {
-    uint16_t instruction = program[pc + 1] | program[pc] << 8;
+    uint16_t instruction = program[pc] | (program[pc + 1] << 8);
     pc += 2;
     uint16_t code, source, destination;
     parseInstruction(instruction, &code, &source, &destination);
