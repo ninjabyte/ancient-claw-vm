@@ -262,14 +262,14 @@ void run(uint8_t* program, uint32_t buflen) {
         break;
       }
       case BR:
-        pc += stackPopUint(source, 16); // TODO make this work for negative displacements
+        pc += (int16_t)stackPopUint(source, 16);
         break;
       case BRZ:
       case BRNZ:
       case BRN:
       case BRNN:
       {
-        int16_t offset = stackPopUint(source, 16); // TODO make this work for negative displacements
+        int16_t offset = stackPopUint(source, 16);
         if((code == BRZ && flag_zero) ||
            (code == BRNZ && !flag_zero) ||
            (code == BRN && flag_negative) ||
