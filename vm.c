@@ -231,7 +231,7 @@ void run(uint8_t* program, uint32_t buflen) {
     pc += 2;
     uint16_t code, source, destination;
     parseInstruction(instruction, &code, &source, &destination);
-    printf("0x%x, %u, %u\n", code, source, destination);
+    printf("PC 0x%u, instruction 0x%x, source %u, dest %u\n", pc-2, code, source, destination);
     switch(code) {
       case LET8:
         stackPushUint(destination, 8, fetchLiteral(program, 8));
@@ -447,6 +447,14 @@ void run(uint8_t* program, uint32_t buflen) {
         }
         break;
       }
+      case ENDZ:
+        if(flag_zero)
+          return;
+        break;
+      case ENDN:
+        if(flag_negative)
+          return;
+        break;
       case END:
         return;
       // default: nop
@@ -457,19 +465,19 @@ void run(uint8_t* program, uint32_t buflen) {
 int main(int argc, char *argv[]) {
   /* PASTEBIN SAMPLE
   LET8 1  
-  d: 101  
+  .db8(101)
   LET8 1  
-  d: 99   
+  .db8(99)
   ADD8 1 1
   LET8 1  
-  d: 200  
+  .db8(200)
   SUB8 1 1
   LET16 1   
-  d: 2
+  .db16(2)
   BRZ 1     
   END       
   MOV8 1 2  
-  END       
+  END
   */
   //uint8_t program[] = {0x00, 0x41, 101, 0x00, 0x41, 99, 0x03, 0x05, 0x00, 0x41, 200, 0x03, 0x45, 0x00, 0x51, 0x02, 0x00, 0x11, 0x94, 0x12, 0x80, 0x01, 0x16, 0x12, 0x80};
   if(argc < 2) {
