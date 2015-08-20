@@ -140,7 +140,7 @@ void mathIntInstruction(unsigned int src, unsigned int dest, int size, int opera
   // TODO make this work for signed
   uint32_t op1 = stackPopUint(src, size);
   uint32_t op2 = stackPopUint(src, size);
-  uint32_t result = 0;
+  int32_t result = 0;
   switch(operation) {
     case OP_ADD:
       result = op2+op1;
@@ -156,6 +156,67 @@ void mathIntInstruction(unsigned int src, unsigned int dest, int size, int opera
       break;
     case OP_MOD:
       result = op2%op1;
+      break;
+  }
+  stackPushUint(dest, size, result);
+  updateFlags(result);
+}
+
+typedef enum { OP_SR = 0, OP_SL, OP_SSR, OP_AND, OP_OR, OP_NOT, OP_NOR, OP_NAND, OP_XOR, OP_NEG } BitwiseOperations;
+void bitwiseShiftInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+  uint8_t places = stackPopUint(src, 8);
+  uint32_t value = stackPopUint(src, size);
+  uint32_t result = 0;
+  switch(operation) {
+    case OP_SR:
+      result = value >> places;
+      break;
+    case OP_SSR:
+      // TODO: check this works correctly
+      result = (int32_t)value >> places;
+      break;
+    case OP_SL:
+      result = value << places;
+      break;
+  }
+  stackPushUint(dest, size, result);
+  updateFlags(result);
+}
+
+void bitwiseTwoOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+  uint32_t op1 = stackPopUint(src, size);
+  uint32_t op2 = stackPopUint(src, size);
+  uint32_t result = 0;
+  switch(operation) {
+    case OP_AND:
+      result = op1 & op2;
+      break;
+    case OP_OR:
+      result = op1 | op2;
+      break;
+    case OP_NOR:
+      result = ~(op1 | op2);
+      break;
+    case OP_NAND:
+      result = ~(op1 & op2);
+      break;
+    case OP_XOR:
+      result = op1 ^ op2;
+      break;
+  }
+  stackPushUint(dest, size, result);
+  updateFlags(result);
+}
+
+void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+  uint32_t op = stackPopUint(src, size);
+  uint32_t result = 0;
+  switch(operation) {
+    case OP_NOT:
+      result = ~op;
+      break;
+    case OP_NEG:
+      result = -op;
       break;
   }
   stackPushUint(dest, size, result);
@@ -208,6 +269,8 @@ void run(uint8_t* program, uint32_t buflen) {
       case DEL32:
         stackPopUint(source, 32);
         break;
+
+      // math
       case ADD8:
         mathIntInstruction(source, destination, 8, OP_ADD);
         break;
@@ -244,6 +307,112 @@ void run(uint8_t* program, uint32_t buflen) {
       case DIV32:
         mathIntInstruction(source, destination, 32, OP_DIV);
         break;
+      case MOD8:
+        mathIntInstruction(source, destination, 8, OP_MOD);
+        break;
+      case MOD16:
+        mathIntInstruction(source, destination, 16, OP_MOD);
+        break;
+      case MOD32:
+        mathIntInstruction(source, destination, 32, OP_MOD);
+        break;
+
+      // bitwise shifts
+      case SR8:
+        bitwiseShiftInstruction(source, destination, 8, OP_SR);
+        break;
+      case SR16:
+        bitwiseShiftInstruction(source, destination, 16, OP_SR);
+        break;
+      case SR32:
+        bitwiseShiftInstruction(source, destination, 32, OP_SR);
+        break;
+      case SSR8:
+        bitwiseShiftInstruction(source, destination, 8, OP_SSR);
+        break;
+      case SSR16:
+        bitwiseShiftInstruction(source, destination, 16, OP_SSR);
+        break;
+      case SSR32:
+        bitwiseShiftInstruction(source, destination, 32, OP_SSR);
+        break;
+      case SL8:
+        bitwiseShiftInstruction(source, destination, 8, OP_SL);
+        break;
+      case SL16:
+        bitwiseShiftInstruction(source, destination, 16, OP_SL);
+        break;
+      case SL32:
+        bitwiseShiftInstruction(source, destination, 32, OP_SL);
+        break;
+
+      // other bitwise operations with two operands
+      case AND8:
+        bitwiseTwoOpInstruction(source, destination, 8, OP_AND);
+        break;
+      case AND16:
+        bitwiseTwoOpInstruction(source, destination, 16, OP_AND);
+        break;
+      case AND32:
+        bitwiseTwoOpInstruction(source, destination, 32, OP_AND);
+        break;
+      case OR8:
+        bitwiseTwoOpInstruction(source, destination, 8, OP_OR);
+        break;
+      case OR16:
+        bitwiseTwoOpInstruction(source, destination, 16, OP_OR);
+        break;
+      case OR32:
+        bitwiseTwoOpInstruction(source, destination, 32, OP_OR);
+        break;
+      case NOR8:
+        bitwiseTwoOpInstruction(source, destination, 8, OP_OR);
+        break;
+      case NOR16:
+        bitwiseTwoOpInstruction(source, destination, 16, OP_NOR);
+        break;
+      case NOR32:
+        bitwiseTwoOpInstruction(source, destination, 32, OP_NOR);
+        break;
+      case NAND8:
+        bitwiseTwoOpInstruction(source, destination, 8, OP_NAND);
+        break;
+      case NAND16:
+        bitwiseTwoOpInstruction(source, destination, 16, OP_NAND);
+        break;
+      case NAND32:
+        bitwiseTwoOpInstruction(source, destination, 32, OP_NAND);
+        break;
+      case XOR8:
+        bitwiseTwoOpInstruction(source, destination, 8, OP_XOR);
+        break;
+      case XOR16:
+        bitwiseTwoOpInstruction(source, destination, 16, OP_XOR);
+        break;
+      case XOR32:
+        bitwiseTwoOpInstruction(source, destination, 32, OP_XOR);
+        break;
+
+      // bitwise operations with one operand
+      case NOT8:
+        bitwiseOneOpInstruction(source, destination, 8, OP_NOT);
+        break;
+      case NOT16:
+        bitwiseOneOpInstruction(source, destination, 16, OP_NOT);
+        break;
+      case NOT32:
+        bitwiseOneOpInstruction(source, destination, 32, OP_NOT);
+        break;
+      case NEG8:
+        bitwiseOneOpInstruction(source, destination, 8, OP_NEG);
+        break;
+      case NEG16:
+        bitwiseOneOpInstruction(source, destination, 16, OP_NEG);
+        break;
+      case NEG32:
+        bitwiseOneOpInstruction(source, destination, 32, OP_NEG);
+        break;
+
       case JMP:
         pc = stackPopUint(source, 32);
         break;
