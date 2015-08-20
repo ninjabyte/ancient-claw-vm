@@ -431,14 +431,14 @@ void run(uint8_t* program, uint32_t buflen) {
         break;
       }
       case BR:
-        pc += (int16_t)stackPopUint(source, 16);
+        pc += (int16_t)fetchLiteral(program, 16);
         break;
       case BRZ:
       case BRNZ:
       case BRN:
       case BRNN:
       {
-        int16_t offset = stackPopUint(source, 16);
+        int16_t offset = fetchLiteral(program, 16);
         if((code == BRZ && flag_zero) ||
            (code == BRNZ && !flag_zero) ||
            (code == BRN && flag_negative) ||
@@ -464,22 +464,20 @@ void run(uint8_t* program, uint32_t buflen) {
 
 int main(int argc, char *argv[]) {
   /* PASTEBIN SAMPLE
-  LET8 1  
-  .db8(101)
-  LET8 1  
-  .db8(99)
-  ADD8 1 1
-  LET8 1  
-  .db8(200)
-  SUB8 1 1
-  LET16 1   
-  .db16(2)
-  BRZ 1     
+  LET8 A
+  .db8u(101)
+  LET8 A  
+  .db8u(99)
+  ADD8 A
+  LET8 A  
+  .db8u(200)
+  SUB8 A
+  BRZ A
+  .db16(2)     
   END       
-  MOV8 1 2  
+  MOV8 A B
   END
   */
-  //uint8_t program[] = {0x00, 0x41, 101, 0x00, 0x41, 99, 0x03, 0x05, 0x00, 0x41, 200, 0x03, 0x45, 0x00, 0x51, 0x02, 0x00, 0x11, 0x94, 0x12, 0x80, 0x01, 0x16, 0x12, 0x80};
   if(argc < 2) {
     printf("Give me an input file!\n");
     return 1;
