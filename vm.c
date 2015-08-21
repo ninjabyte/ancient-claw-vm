@@ -18,6 +18,7 @@ This software can be relicensed on request; contact the author.
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include "bytecode.h"
 
 #define NUM_STACKS 4
@@ -45,231 +46,103 @@ typedef enum {
 } RuntimeError;
 RuntimeError last_error = NONE;
 
-static void parseInstruction(uint16_t instruction, uint16_t* code, uint16_t* source, uint16_t* destination) {
-  *destination = instruction & 3;
-  *source = (instruction & 12) >> 2;
-  *code = instruction >> 4;
+
+// TODO make fetch check program bounds
+static uint32_t fetch8bitLiteral(uint8_t* p) {
+  return p[pc++];
 }
 
-static uint32_t fetchLiteral(uint8_t* p, int size) {
-  uint32_t r;
-  switch(size) {
-    case 8: // 8 bit literals will still take 16 bits, in order to keep instructions 16-bit aligned
-      r = p[pc];
-      break;
-    case 16:
-    default:
-      r = p[pc] | p[pc + 1]<<8;
-      break;
-    case 32:
-      r = p[pc] | p[pc + 1]<<8 | p[pc + 2]<<16 | p[pc + 3]<<24;
-      break;
-  }
-  pc += size/8;
-  return r;
+static uint32_t fetch16bitLiteral(uint8_t* p) {
+  pc += 2;
+  return p[pc - 2] | p[pc - 1] << 8;
 }
 
-static void stackPushUint(unsigned int stack, int size, uint32_t value) {
-  //printf("Push to stack %d value %u with size %d. cur sp: %u\n", stack, value, size, sp[stack]);
-  switch(size) {
-    case 8:
-      if(sp[stack] + 1 >= STACK_SIZE) {
-        last_error = ERR_STACK_OVERFLOW;
-        return;
-      }
-      stacks[stack][sp[stack]] = value & 0xff;
-      sp[stack]++;
-      break;
-    case 16:
-      if(sp[stack] + 2 >= STACK_SIZE) {
-        last_error = ERR_STACK_OVERFLOW;
-        return;
-      }
-      stacks[stack][sp[stack]] = value & 0xff;
-      stacks[stack][sp[stack]+1] = value >> 8;
-      sp[stack] += 2;
-      break;
-    case 32:
-      if(sp[stack] + 4 >= STACK_SIZE) {
-        last_error = ERR_STACK_OVERFLOW;
-        return;
-      }
-      stacks[stack][sp[stack]] = value & 0xff;
-      stacks[stack][sp[stack]+1] = (value & 0xff00) >> 8;
-      stacks[stack][sp[stack]+2] = (value & 0xff0000) >> 16;
-      stacks[stack][sp[stack]+3] = value >> 24;
-      sp[stack] += 4;
-      break;
-  }
+static uint32_t fetch32bitLiteral(uint8_t* p) {
+  pc += 4;
+  return p[pc - 4] | p[pc - 3]<<8 | p[pc - 2]<<16 | p[pc - 1]<<24;
 }
 
-static uint32_t stackPeekUint(unsigned int stack, int size) {
-  uint32_t value = 0;
-  switch(size) {
-    case 8:
-      if(!sp[stack]) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      value = stacks[stack][sp[stack]-1];
-      break;
-    case 16:
-      if(sp[stack] < 2) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      value = stacks[stack][sp[stack]-1] << 8;
-      value |= stacks[stack][sp[stack]-2];
-      break;
-    case 32:
-      if(sp[stack] < 4) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      value = stacks[stack][sp[stack]-1] << 24;
-      value |= stacks[stack][sp[stack]-2] << 16;
-      value |= stacks[stack][sp[stack]-3] << 8;
-      value |= stacks[stack][sp[stack]-4];
-      break;
+static void stackPush8bit(unsigned int stack, uint8_t value) {
+  if(++sp[stack] >= STACK_SIZE) {
+    last_error = ERR_STACK_OVERFLOW;
+    return;
   }
+  stacks[stack][sp[stack] - 1] = value;
+}
+
+static void stackPush16bit(unsigned int stack, uint16_t value) {
+  if(sp[stack] + sizeof(uint16_t) >= STACK_SIZE) {
+    last_error = ERR_STACK_OVERFLOW;
+    return;
+  }
+  memcpy(&stacks[stack][sp[stack]], &value, sizeof(uint16_t));
+  sp[stack] += sizeof(uint16_t);
+}
+
+static void stackPush32bit(unsigned int stack, uint32_t value) {
+  if(sp[stack] + sizeof(uint32_t) >= STACK_SIZE) {
+    last_error = ERR_STACK_OVERFLOW;
+    return;
+  }
+  memcpy(&stacks[stack][sp[stack]], &value, sizeof(uint32_t));
+  sp[stack] += sizeof(uint32_t);
+}
+
+static uint8_t stackPeek8bit(unsigned int stack) {
+  if(!sp[stack]) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
+  }
+  return stacks[stack][sp[stack]-1];
+}
+
+static uint16_t stackPeek16bit(unsigned int stack) {
+  if(sp[stack] < sizeof(uint16_t)) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
+  }
+  uint16_t value;
+  memcpy(&value, &stacks[stack][sp[stack]-sizeof(uint16_t)], sizeof(uint16_t));
   return value;
 }
 
-static uint32_t stackPopUint(unsigned int stack, int size) {
-  uint32_t value = 0;
-  switch(size) {
-    case 8:
-      if(!sp[stack]) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      sp[stack]--;
-      value = stacks[stack][sp[stack]];
-      break;
-    case 16:
-      if(sp[stack] < 2) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      sp[stack]--;
-      value = stacks[stack][sp[stack]] << 8;
-      sp[stack]--;
-      value |= stacks[stack][sp[stack]];
-      break;
-    case 32:
-      if(sp[stack] < 4) {
-        last_error = ERR_STACK_UNDERFLOW;
-        return 0;
-      }
-      sp[stack]--;
-      value = stacks[stack][sp[stack]] << 24;
-      sp[stack]--;
-      value |= stacks[stack][sp[stack]] << 16;
-      sp[stack]--;
-      value |= stacks[stack][sp[stack]] << 8;
-      sp[stack]--;
-      value |= stacks[stack][sp[stack]];
-      break;
+static uint32_t stackPeek32bit(unsigned int stack) {
+  if(sp[stack] < sizeof(uint32_t)) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
   }
-  //printf("Pop from stack %d value %u with size %d\n", stack, value, size);
+  uint32_t value;
+  memcpy(&value, &stacks[stack][sp[stack]-sizeof(uint32_t)], sizeof(uint32_t));
   return value;
 }
 
-typedef enum {OP_ADD = 0, OP_ADDF, OP_SUB, OP_SUBF, OP_MUL,OP_MULF, OP_DIV, OP_DIVF, OP_MOD, OP_MODF} MathOperations;
-static void mathIntInstruction(unsigned int src, unsigned int dest, int size, int operation) {
-  uint32_t op1 = stackPopUint(src, size);
-  uint32_t op2 = stackPopUint(src, size);
-  int32_t result = 0;
-  switch(operation) {
-    case OP_ADD:
-      result = op2+op1;
-      break;
-    case OP_SUB:
-      result = op2-op1;
-      break;
-    case OP_MUL:
-      result = op2*op1;
-      break;
-    case OP_DIV:
-      if(op1) {
-        result = op2/op1;
-      } else {
-        last_error = ERR_ARITHMETIC;
-        return;
-      }
-      break;
-    case OP_MOD:
-      if(op1) {
-        result = op2%op1;
-      } else {
-        last_error = ERR_ARITHMETIC;
-        return;
-      }
-      break;
+static uint8_t stackPop8bit(unsigned int stack) {
+  if(!sp[stack]) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
   }
-  stackPushUint(dest, size, result);
-  updateFlags(result);
+  return stacks[stack][--sp[stack]];
 }
 
-typedef enum { OP_SR = 0, OP_SL, OP_SSR, OP_AND, OP_OR, OP_NOT, OP_NOR, OP_NAND, OP_XOR, OP_NEG } BitwiseOperations;
-static void bitwiseShiftInstruction(unsigned int src, unsigned int dest, int size, int operation) {
-  uint8_t places = stackPopUint(src, 8);
-  uint32_t value = stackPopUint(src, size);
-  uint32_t result = 0;
-  switch(operation) {
-    case OP_SR:
-      result = value >> places;
-      break;
-    case OP_SSR:
-      // TODO: check this works correctly
-      result = (int32_t)value >> places;
-      break;
-    case OP_SL:
-      result = value << places;
-      break;
+static uint16_t stackPop16bit(unsigned int stack) {
+  if(sp[stack] < sizeof(uint16_t)) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
   }
-  stackPushUint(dest, size, result);
-  updateFlags(result);
+  uint16_t value;
+  sp[stack] -= sizeof(uint16_t);
+  memcpy(&value, &stacks[stack][sp[stack]], sizeof(uint16_t));
+  return value;
 }
-
-static void bitwiseTwoOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
-  uint32_t op1 = stackPopUint(src, size);
-  uint32_t op2 = stackPopUint(src, size);
-  uint32_t result = 0;
-  switch(operation) {
-    case OP_AND:
-      result = op1 & op2;
-      break;
-    case OP_OR:
-      result = op1 | op2;
-      break;
-    case OP_NOR:
-      result = ~(op1 | op2);
-      break;
-    case OP_NAND:
-      result = ~(op1 & op2);
-      break;
-    case OP_XOR:
-      result = op1 ^ op2;
-      break;
+static uint32_t stackPop32bit(unsigned int stack) {
+  if(sp[stack] < sizeof(uint32_t)) {
+    last_error = ERR_STACK_UNDERFLOW;
+    return 0;
   }
-  stackPushUint(dest, size, result);
-  updateFlags(result);
-}
-
-static void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
-  uint32_t op = stackPopUint(src, size);
-  uint32_t result = 0;
-  switch(operation) {
-    case OP_NOT:
-      result = ~op;
-      break;
-    case OP_NEG:
-      result = -op;
-      break;
-  }
-  stackPushUint(dest, size, result);
-  updateFlags(result);
+  uint32_t value;
+  sp[stack] -= sizeof(uint32_t);
+  memcpy(&value, &stacks[stack][sp[stack]], sizeof(uint32_t));
+  return value;
 }
 
 static void run(uint8_t* program, uint32_t buflen) {
@@ -282,199 +155,401 @@ static void run(uint8_t* program, uint32_t buflen) {
     }
     uint16_t instruction = program[pc] | (program[pc + 1] << 8);
     pc += 2;
-    uint16_t code, source, destination;
-    parseInstruction(instruction, &code, &source, &destination);
-    //printf("PC 0x%u, instruction 0x%x, source %u, dest %u\n", pc-2, code, source, destination);
+    uint16_t destination = instruction & 3;
+    uint16_t source = (instruction & 12) >> 2;
+    uint16_t code = instruction >> 4;
+
+#ifdef DEBUG
+    printf("PC 0x%u, instruction 0x%x, source %u, dest %u\n", pc-2, code, source, destination);
+#endif
     switch(code) {
       case LET8:
-        stackPushUint(destination, 8, fetchLiteral(program, 8));
+        stackPush8bit(destination, fetch8bitLiteral(program));
         break;
       case LET16:
-        stackPushUint(destination, 16, fetchLiteral(program, 16));
+        stackPush16bit(destination, fetch16bitLiteral(program));
         break;
       case LET32:
-        stackPushUint(destination, 32, fetchLiteral(program, 32));
+        stackPush32bit(destination, fetch32bitLiteral(program));
         break;
       case CPY8:
-        stackPushUint(destination, 8, stackPeekUint(source, 8));
+        stackPush8bit(destination, stackPeek8bit(source));
         break;
       case CPY16:
-        stackPushUint(destination, 16, stackPeekUint(source, 16));
+        stackPush16bit(destination, stackPeek16bit(source));
         break;
       case CPY32:
-        stackPushUint(destination, 32, stackPeekUint(source, 32));
+        stackPush32bit(destination, stackPeek32bit(source));
         break;
       case MOV8:
-        stackPushUint(destination, 8, stackPopUint(source, 8));
+        stackPush8bit(destination, stackPop8bit(source));
         break;
       case MOV16:
-        stackPushUint(destination, 16, stackPopUint(source, 16));
+        stackPush16bit(destination, stackPop16bit(source));
         break;
       case MOV32:
-        stackPushUint(destination, 32, stackPopUint(source, 32));
+        stackPush32bit(destination, stackPop32bit(source));
         break;
       case DEL8:
-        stackPopUint(source, 8);
+        stackPop8bit(source);
         break;
       case DEL16:
-        stackPopUint(source, 16);
+        stackPop16bit(source);
         break;
       case DEL32:
-        stackPopUint(source, 32);
+        stackPop32bit(source);
         break;
 
       // math
       case ADD8:
-        mathIntInstruction(source, destination, 8, OP_ADD);
+      {
+        uint8_t r = stackPop8bit(source) + stackPop8bit(source);
+        stackPush8bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case ADD16:
-        mathIntInstruction(source, destination, 16, OP_ADD);
+      {
+        uint16_t r = stackPop16bit(source) + stackPop16bit(source);
+        stackPush16bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case ADD32:
-        mathIntInstruction(source, destination, 32, OP_ADD);
+      {
+        uint32_t r = stackPop32bit(source) + stackPop32bit(source);
+        stackPush32bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case SUB8:
-        mathIntInstruction(source, destination, 8, OP_SUB);
+      {
+        uint8_t op1 = stackPop8bit(source);
+        uint8_t r = stackPop8bit(source) - op1;
+        stackPush8bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case SUB16:
-        mathIntInstruction(source, destination, 16, OP_SUB);
+      {
+        uint16_t op1 = stackPop16bit(source);
+        uint16_t r = stackPop16bit(source) - op1;
+        stackPush16bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case SUB32:
-        mathIntInstruction(source, destination, 32, OP_SUB);
+      {
+        uint32_t op1 = stackPop32bit(source);
+        uint32_t r = stackPop32bit(source) - op1;
+        stackPush32bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MUL8:
-        mathIntInstruction(source, destination, 8, OP_MUL);
+      {
+        uint8_t r = stackPop8bit(source) * stackPop8bit(source);
+        stackPush8bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MUL16:
-        mathIntInstruction(source, destination, 16, OP_MUL);
+      {
+        uint16_t r = stackPop16bit(source) * stackPop16bit(source);
+        stackPush16bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MUL32:
-        mathIntInstruction(source, destination, 32, OP_MUL);
+      {
+        uint32_t r = stackPop32bit(source) * stackPop32bit(source);
+        stackPush32bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case DIV8:
-        mathIntInstruction(source, destination, 8, OP_DIV);
+      {
+        uint8_t op1 = stackPop8bit(source);
+        uint8_t r = stackPop8bit(source) / op1;
+        stackPush8bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case DIV16:
-        mathIntInstruction(source, destination, 16, OP_DIV);
+      {
+        uint16_t op1 = stackPop16bit(source);
+        uint16_t r = stackPop16bit(source) / op1;
+        stackPush16bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case DIV32:
-        mathIntInstruction(source, destination, 32, OP_DIV);
+      {
+        uint32_t op1 = stackPop32bit(source);
+        uint32_t r = stackPop32bit(source) / op1;
+        stackPush32bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MOD8:
-        mathIntInstruction(source, destination, 8, OP_MOD);
+      {
+        uint8_t op1 = stackPop8bit(source);
+        uint8_t r = stackPop8bit(source) % op1;
+        stackPush8bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MOD16:
-        mathIntInstruction(source, destination, 16, OP_MOD);
+      {
+        uint16_t op1 = stackPop16bit(source);
+        uint16_t r = stackPop16bit(source) % op1;
+        stackPush16bit(destination, r);
+        updateFlags(r);
         break;
+      }
       case MOD32:
-        mathIntInstruction(source, destination, 32, OP_MOD);
+      {
+        uint32_t op1 = stackPop32bit(source);
+        uint32_t r = stackPop32bit(source) % op1;
+        stackPush32bit(destination, r);
+        updateFlags(r);
         break;
+      }
 
       // bitwise shifts
       case SR8:
-        bitwiseShiftInstruction(source, destination, 8, OP_SR);
+      {
+        uint8_t places = stackPop8bit(source);
+        uint8_t value = stackPop8bit(source) >> places;
+        stackPush8bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SR16:
-        bitwiseShiftInstruction(source, destination, 16, OP_SR);
+      {
+        uint16_t places = stackPop16bit(source);
+        uint16_t value = stackPop16bit(source) >> places;
+        stackPush16bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SR32:
-        bitwiseShiftInstruction(source, destination, 32, OP_SR);
+      {
+        uint32_t places = stackPop32bit(source);
+        uint32_t value = stackPop32bit(source) >> places;
+        stackPush32bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SSR8:
-        bitwiseShiftInstruction(source, destination, 8, OP_SSR);
+      {
+        uint8_t places = stackPop8bit(source);
+        int8_t value = (int8_t)stackPop8bit(source) >> places;
+        stackPush8bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SSR16:
-        bitwiseShiftInstruction(source, destination, 16, OP_SSR);
+      {
+        uint16_t places = stackPop16bit(source);
+        int16_t value = (int16_t)stackPop16bit(source) >> places;
+        stackPush16bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SSR32:
-        bitwiseShiftInstruction(source, destination, 32, OP_SSR);
+      {
+        uint32_t places = stackPop32bit(source);
+        int32_t value = (int32_t)stackPop32bit(source) >> places;
+        stackPush32bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SL8:
-        bitwiseShiftInstruction(source, destination, 8, OP_SL);
+      {
+        uint8_t places = stackPop8bit(source);
+        int8_t value = (int8_t)stackPop8bit(source) << places;
+        stackPush8bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SL16:
-        bitwiseShiftInstruction(source, destination, 16, OP_SL);
+      {
+        uint16_t places = stackPop16bit(source);
+        int16_t value = (int16_t)stackPop16bit(source) << places;
+        stackPush16bit(destination, value);
+        updateFlags(value);
         break;
+      }
       case SL32:
-        bitwiseShiftInstruction(source, destination, 32, OP_SL);
+      {
+        uint32_t places = stackPop32bit(source);
+        int32_t value = (int32_t)stackPop32bit(source) << places;
+        stackPush32bit(destination, value);
+        updateFlags(value);
         break;
+      }
 
       // other bitwise operations with two operands
       case AND8:
-        bitwiseTwoOpInstruction(source, destination, 8, OP_AND);
+      {
+        uint8_t v = stackPop8bit(source) & stackPop8bit(source);
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case AND16:
-        bitwiseTwoOpInstruction(source, destination, 16, OP_AND);
+      {
+        uint16_t v = stackPop16bit(source) & stackPop16bit(source);
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case AND32:
-        bitwiseTwoOpInstruction(source, destination, 32, OP_AND);
+      {
+        uint32_t v = stackPop32bit(source) & stackPop32bit(source);
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case OR8:
-        bitwiseTwoOpInstruction(source, destination, 8, OP_OR);
+      {
+        uint8_t v = stackPop8bit(source) | stackPop8bit(source);
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case OR16:
-        bitwiseTwoOpInstruction(source, destination, 16, OP_OR);
+      {
+        uint16_t v = stackPop16bit(source) | stackPop16bit(source);
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case OR32:
-        bitwiseTwoOpInstruction(source, destination, 32, OP_OR);
+      {
+        uint32_t v = stackPop32bit(source) | stackPop32bit(source);
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NOR8:
-        bitwiseTwoOpInstruction(source, destination, 8, OP_OR);
+      {
+        uint8_t v = ~(stackPop8bit(source) | stackPop8bit(source));
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NOR16:
-        bitwiseTwoOpInstruction(source, destination, 16, OP_NOR);
+      {
+        uint16_t v = ~(stackPop16bit(source) | stackPop16bit(source));
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NOR32:
-        bitwiseTwoOpInstruction(source, destination, 32, OP_NOR);
+      {
+        uint32_t v = ~(stackPop32bit(source) | stackPop32bit(source));
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NAND8:
-        bitwiseTwoOpInstruction(source, destination, 8, OP_NAND);
+      {
+        uint8_t v = ~(stackPop8bit(source) & stackPop8bit(source));
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NAND16:
-        bitwiseTwoOpInstruction(source, destination, 16, OP_NAND);
+      {
+        uint16_t v = ~(stackPop16bit(source) & stackPop16bit(source));
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NAND32:
-        bitwiseTwoOpInstruction(source, destination, 32, OP_NAND);
+      {
+        uint32_t v = ~(stackPop32bit(source) & stackPop32bit(source));
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case XOR8:
-        bitwiseTwoOpInstruction(source, destination, 8, OP_XOR);
+      {
+        uint8_t v = stackPop8bit(source) ^ stackPop8bit(source);
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case XOR16:
-        bitwiseTwoOpInstruction(source, destination, 16, OP_XOR);
+      {
+        uint16_t v = stackPop16bit(source) ^ stackPop16bit(source);
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case XOR32:
-        bitwiseTwoOpInstruction(source, destination, 32, OP_XOR);
+      {
+        uint32_t v = stackPop32bit(source) ^ stackPop32bit(source);
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
 
       // bitwise operations with one operand
       case NOT8:
-        bitwiseOneOpInstruction(source, destination, 8, OP_NOT);
+      {
+        uint8_t v = ~ stackPop8bit(source);
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NOT16:
-        bitwiseOneOpInstruction(source, destination, 16, OP_NOT);
+      {
+        uint16_t v = ~ stackPop16bit(source);
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NOT32:
-        bitwiseOneOpInstruction(source, destination, 32, OP_NOT);
+      {
+        uint32_t v = ~ stackPop32bit(source);
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NEG8:
-        bitwiseOneOpInstruction(source, destination, 8, OP_NEG);
+      {
+        int8_t v = -(int8_t)stackPop8bit(source);
+        stackPush8bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NEG16:
-        bitwiseOneOpInstruction(source, destination, 16, OP_NEG);
+      {
+        int16_t v = -(int16_t)stackPop16bit(source);
+        stackPush16bit(destination, v);
+        updateFlags(v);
         break;
+      }
       case NEG32:
-        bitwiseOneOpInstruction(source, destination, 32, OP_NEG);
+      {
+        int32_t v = -(int32_t)stackPop32bit(source);
+        stackPush32bit(destination, v);
+        updateFlags(v);
         break;
+      }
 
       case JMP:
-        pc = stackPopUint(source, 32);
+        pc = stackPop32bit(source);
         break;
       case JMPZ:
       case JMPNZ:
       case JMPN:
       case JMPNN:
       {
-        uint32_t loc = stackPopUint(source, 32);
+        uint32_t loc = stackPop32bit(source);
         if((code == JMPZ && flag_zero) ||
            (code == JMPNZ && !flag_zero) ||
            (code == JMPN && flag_negative) ||
@@ -484,14 +559,14 @@ static void run(uint8_t* program, uint32_t buflen) {
         break;
       }
       case BR:
-        pc += (int16_t)fetchLiteral(program, 16);
+        pc += (int16_t)fetch16bitLiteral(program);
         break;
       case BRZ:
       case BRNZ:
       case BRN:
       case BRNN:
       {
-        int16_t offset = fetchLiteral(program, 16);
+        int16_t offset = fetch16bitLiteral(program);
         if((code == BRZ && flag_zero) ||
            (code == BRNZ && !flag_zero) ||
            (code == BRN && flag_negative) ||
