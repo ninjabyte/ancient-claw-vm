@@ -541,6 +541,7 @@ static void run(uint8_t* program, uint32_t buflen) {
         break;
       }
 
+      // flow control
       case JMP:
         pc = stackPop32bit(source);
         break;
@@ -585,6 +586,25 @@ static void run(uint8_t* program, uint32_t buflen) {
         break;
       case END:
         return;
+
+      // debug instructions
+      case DMPSSTR:
+      {
+        char c;
+        while((c = fetch8bitLiteral(program))) {
+          putchar(c);
+        }
+        break;
+      }
+      case DMPN8:
+        printf("%u", stackPop8bit(source));
+        break;
+      case DMPN16:
+        printf("%u", stackPop16bit(source));
+        break;
+      case DMPN32:
+        printf("%u", stackPop32bit(source));
+        break;
       // default: nop
     }
   }
