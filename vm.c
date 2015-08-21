@@ -45,13 +45,13 @@ typedef enum {
 } RuntimeError;
 RuntimeError last_error = NONE;
 
-void parseInstruction(uint16_t instruction, uint16_t* code, uint16_t* source, uint16_t* destination) {
+static void parseInstruction(uint16_t instruction, uint16_t* code, uint16_t* source, uint16_t* destination) {
   *destination = instruction & 3;
   *source = (instruction & 12) >> 2;
   *code = instruction >> 4;
 }
 
-uint32_t fetchLiteral(uint8_t* p, int size) {
+static uint32_t fetchLiteral(uint8_t* p, int size) {
   uint32_t r;
   switch(size) {
     case 8: // 8 bit literals will still take 16 bits, in order to keep instructions 16-bit aligned
@@ -69,8 +69,8 @@ uint32_t fetchLiteral(uint8_t* p, int size) {
   return r;
 }
 
-void stackPushUint(unsigned int stack, int size, uint32_t value) {
-  printf("Push to stack %d value %u with size %d. cur sp: %u\n", stack, value, size, sp[stack]);
+static void stackPushUint(unsigned int stack, int size, uint32_t value) {
+  //printf("Push to stack %d value %u with size %d. cur sp: %u\n", stack, value, size, sp[stack]);
   switch(size) {
     case 8:
       if(sp[stack] + 1 >= STACK_SIZE) {
@@ -103,7 +103,7 @@ void stackPushUint(unsigned int stack, int size, uint32_t value) {
   }
 }
 
-uint32_t stackPeekUint(unsigned int stack, int size) {
+static uint32_t stackPeekUint(unsigned int stack, int size) {
   uint32_t value = 0;
   switch(size) {
     case 8:
@@ -135,7 +135,7 @@ uint32_t stackPeekUint(unsigned int stack, int size) {
   return value;
 }
 
-uint32_t stackPopUint(unsigned int stack, int size) {
+static uint32_t stackPopUint(unsigned int stack, int size) {
   uint32_t value = 0;
   switch(size) {
     case 8:
@@ -171,12 +171,12 @@ uint32_t stackPopUint(unsigned int stack, int size) {
       value |= stacks[stack][sp[stack]];
       break;
   }
-  printf("Pop from stack %d value %u with size %d\n", stack, value, size);
+  //printf("Pop from stack %d value %u with size %d\n", stack, value, size);
   return value;
 }
 
 typedef enum {OP_ADD = 0, OP_ADDF, OP_SUB, OP_SUBF, OP_MUL,OP_MULF, OP_DIV, OP_DIVF, OP_MOD, OP_MODF} MathOperations;
-void mathIntInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+static void mathIntInstruction(unsigned int src, unsigned int dest, int size, int operation) {
   uint32_t op1 = stackPopUint(src, size);
   uint32_t op2 = stackPopUint(src, size);
   int32_t result = 0;
@@ -212,7 +212,7 @@ void mathIntInstruction(unsigned int src, unsigned int dest, int size, int opera
 }
 
 typedef enum { OP_SR = 0, OP_SL, OP_SSR, OP_AND, OP_OR, OP_NOT, OP_NOR, OP_NAND, OP_XOR, OP_NEG } BitwiseOperations;
-void bitwiseShiftInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+static void bitwiseShiftInstruction(unsigned int src, unsigned int dest, int size, int operation) {
   uint8_t places = stackPopUint(src, 8);
   uint32_t value = stackPopUint(src, size);
   uint32_t result = 0;
@@ -232,7 +232,7 @@ void bitwiseShiftInstruction(unsigned int src, unsigned int dest, int size, int 
   updateFlags(result);
 }
 
-void bitwiseTwoOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+static void bitwiseTwoOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
   uint32_t op1 = stackPopUint(src, size);
   uint32_t op2 = stackPopUint(src, size);
   uint32_t result = 0;
@@ -257,7 +257,7 @@ void bitwiseTwoOpInstruction(unsigned int src, unsigned int dest, int size, int 
   updateFlags(result);
 }
 
-void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
+static void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int operation) {
   uint32_t op = stackPopUint(src, size);
   uint32_t result = 0;
   switch(operation) {
@@ -272,7 +272,7 @@ void bitwiseOneOpInstruction(unsigned int src, unsigned int dest, int size, int 
   updateFlags(result);
 }
 
-void run(uint8_t* program, uint32_t buflen) {
+static void run(uint8_t* program, uint32_t buflen) {
   pc = 0;
   last_error = NONE;
   updateFlags(0); // reset flags
@@ -284,7 +284,7 @@ void run(uint8_t* program, uint32_t buflen) {
     pc += 2;
     uint16_t code, source, destination;
     parseInstruction(instruction, &code, &source, &destination);
-    printf("PC 0x%u, instruction 0x%x, source %u, dest %u\n", pc-2, code, source, destination);
+    //printf("PC 0x%u, instruction 0x%x, source %u, dest %u\n", pc-2, code, source, destination);
     switch(code) {
       case LET8:
         stackPushUint(destination, 8, fetchLiteral(program, 8));
