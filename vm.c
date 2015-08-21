@@ -220,6 +220,10 @@ static void run(uint8_t* program, uint32_t buflen) {
       case DEL32:
         stackPop32bit(source);
         break;
+      case DELALL:
+        for(int i = 0; i < NUM_STACKS; i++)
+          sp[0] = 0;
+        break;
 
       // math
       case ADD8:
@@ -669,6 +673,27 @@ static void run(uint8_t* program, uint32_t buflen) {
       case DMPN32:
         printf("%u", stackPop32bit(source));
         break;
+      case GETN8:
+      {
+        uint32_t n;
+        scanf("%u", &n);
+        stackPush8bit(destination, n);
+        break;
+      }
+      case GETN16:
+      {
+        uint32_t n;
+        scanf("%u", &n);
+        stackPush16bit(destination, n);
+        break;
+      }
+      case GETN32:
+      {
+        uint32_t n;
+        scanf("%u", &n);
+        stackPush32bit(destination, n);
+        break;
+      }
       // default: nop
     }
   }
