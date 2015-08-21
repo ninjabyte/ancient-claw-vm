@@ -190,6 +190,27 @@ static void run(uint8_t* program, uint32_t buflen) {
       case MOV32:
         stackPush32bit(destination, stackPop32bit(source));
         break;
+      case SWP8:
+      {
+        uint8_t a = stackPop8bit(source);
+        stackPush8bit(source, stackPop8bit(destination));
+        stackPush8bit(destination, a);
+        break;
+      }
+      case SWP16:
+      {
+        uint16_t a = stackPop16bit(source);
+        stackPush16bit(source, stackPop16bit(destination));
+        stackPush16bit(destination, a);
+        break;
+      }
+      case SWP32:
+      {
+        uint32_t a = stackPop32bit(source);
+        stackPush32bit(source, stackPop32bit(destination));
+        stackPush32bit(destination, a);
+        break;
+      }
       case DEL8:
         stackPop8bit(source);
         break;
