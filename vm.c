@@ -561,6 +561,49 @@ static void run(uint8_t* program, uint32_t buflen) {
         updateFlags(v);
         break;
       }
+      // increment / decrement
+      case INC8:
+      {
+        uint8_t* v = &stacks[source][sp[source] - 1];
+        (*v)++;
+        updateFlags(*v);
+        break;
+      }
+      case INC16:
+      {
+        void* v = &stacks[source][sp[source] - 2];
+        (*(uint16_t*)v)++;
+        updateFlags(*(uint16_t*)v);
+        break;
+      }
+      case INC32:
+      {
+        void* v = &stacks[source][sp[source] - 4];
+        (*(uint32_t*)v)++;
+        updateFlags(*(uint32_t*)v);
+        break;
+      }
+      case DEC8:
+      {
+        uint8_t* v = &stacks[source][sp[source] - 1];
+        (*v)--;
+        updateFlags(*v);
+        break;
+      }
+      case DEC16:
+      {
+        void* v = &stacks[source][sp[source] - 2];
+        (*(uint16_t*)v)--;
+        updateFlags(*(uint16_t*)v);
+        break;
+      }
+      case DEC32:
+      {
+        void* v = &stacks[source][sp[source] - 4];
+        (*(uint32_t*)v)--;
+        updateFlags(*(uint32_t*)v);
+        break;
+      }
 
       // flow control
       case JMP:
