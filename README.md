@@ -3,14 +3,4 @@
 
 Virtual Machine that runs the CLAW bytecode. Write once, run... on the microcat.
 
-Not all CLAW instructions are implemented yet.
-
-Meaning of the runtime errors:
-
-1 - Arithmetic exception (divide by zero, ...)
-
-2 - Stack overflow
-
-3 - Stack underflow
-
-5 - Target out of bounds (check all jumps. The program must end with END or equivalent conditional end instruction).
+Not all CLAW instructions are implemented yet. The instruction set is likely to have incompatible changes over time.

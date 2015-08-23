@@ -826,8 +826,24 @@ int main(int argc, char *argv[]) {
 
   fclose(f);
   run(program, size);
-  if(last_error != NONE) {
-    printf("Runtime error: %u\n", last_error);
+  switch(last_error) {
+    case ERR_ARITHMETIC:
+      printf("Runtime error: arithmetic exception at PC %x\n", pc);
+      break;
+    case ERR_STACK_UNDERFLOW:
+      printf("Runtime error: stack underflow at PC %x\n", pc);
+      break;
+    case ERR_STACK_OVERFLOW:
+      printf("Runtime error: stack overflow at PC %x\n", pc);
+      break;
+    case ERR_INSUFFICIENT_PERMISSIONS:
+      printf("Runtime error: insufficient permissions at PC %x\n", pc);
+      break;
+    case ERR_TARGET:
+      printf("Runtime error: target %x out of bounds\n", pc);
+      break;
+    default:
+      break;
   }
   return 0;
 }
