@@ -172,6 +172,15 @@ static void run(uint8_t* program, uint32_t buflen) {
       case LET32:
         stackPush32bit(destination, fetch32bitLiteral(program));
         break;
+      case LETA:
+      {
+        uint16_t len = stackPop16bit(source);
+        // this can be optimized to do a more direct copy, but remember to check for stack overflows
+        for(int i = 0; i < len; i++) {
+          stackPush8bit(destination, fetch8bitLiteral(program));
+        }
+        break;
+      }
       case CPY8:
         stackPush8bit(destination, stackPeek8bit(source));
         break;
@@ -181,6 +190,17 @@ static void run(uint8_t* program, uint32_t buflen) {
       case CPY32:
         stackPush32bit(destination, stackPeek32bit(source));
         break;
+      case CPYA:
+      {
+        uint16_t len = stackPop16bit(source);
+        if(sp[destination] + len >= STACK_SIZE) {
+          last_error = ERR_STACK_OVERFLOW;
+          break;
+        }
+        memcpy(&stacks[source][sp[source]-len], &stacks[destination][sp[destination]], len);
+        sp[destination] += len;
+        break;
+      }
       case MOV8:
         stackPush8bit(destination, stackPop8bit(source));
         break;
@@ -190,6 +210,23 @@ static void run(uint8_t* program, uint32_t buflen) {
       case MOV32:
         stackPush32bit(destination, stackPop32bit(source));
         break;
+      case MOVA:
+      {
+        uint16_t len = stackPop16bit(source);
+        if(sp[source] >= len)
+          sp[source] -= len;
+        else {
+          last_error = ERR_STACK_UNDERFLOW;
+          break;
+        }
+        if(sp[destination] + len >= STACK_SIZE) {
+          last_error = ERR_STACK_OVERFLOW;
+          break;
+        }
+        memcpy(&stacks[source][sp[source]], &stacks[destination][sp[destination]], len);
+        sp[destination] += len;
+        break;
+      }
       case SWP8:
       {
         uint8_t a = stackPop8bit(source);
@@ -220,6 +257,15 @@ static void run(uint8_t* program, uint32_t buflen) {
       case DEL32:
         stackPop32bit(source);
         break;
+      case DELA:
+      {
+        uint16_t len = stackPop16bit(source);
+        if(sp[source] >= len)
+          sp[source] -= len;
+        else
+          last_error = ERR_STACK_UNDERFLOW;
+        break;
+      }
       case DELALL:
         for(int i = 0; i < NUM_STACKS; i++)
           sp[0] = 0;
@@ -608,6 +654,44 @@ static void run(uint8_t* program, uint32_t buflen) {
         updateFlags(*(uint32_t*)v);
         break;
       }
+      // equality tests and manual flag manipulation
+      case EQU8:
+      {
+        uint8_t op1 = stackPop8bit(source);
+        updateFlags(stackPop8bit(source) - op1);
+        break;
+      }
+      case EQU16:
+      {
+        uint16_t op1 = stackPop16bit(source);
+        updateFlags(stackPop16bit(source) - op1);
+        break;
+      }
+      case EQU32:
+      {
+        uint8_t op1 = stackPop32bit(source);
+        updateFlags(stackPop32bit(source) - op1);
+        break;
+      }
+      case STZ:
+        flag_zero = 1;
+        break;
+      case STN:
+        flag_negative = 1;
+        break;
+      case CLZ:
+        flag_zero = 0;
+        break;
+      case CLN:
+        flag_negative = 0;
+        break;
+      case TGZ:
+        flag_zero = !flag_zero;
+        break;
+      case TGN:
+        flag_negative = !flag_negative;
+        break;
+
 
       // flow control
       case JMP:
@@ -644,6 +728,9 @@ static void run(uint8_t* program, uint32_t buflen) {
         }
         break;
       }
+      case PPTR:
+        stackPush32bit(destination, pc);
+        break;
       case ENDZ:
         if(flag_zero)
           return;
