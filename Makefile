@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-c -Wall -std=c99
+CFLAGS=-c -Wall -std=c11
 LDFLAGS=
 SOURCES=vm.c
 OBJECTS=$(SOURCES:.c=.o)
